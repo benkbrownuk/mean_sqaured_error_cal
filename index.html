@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quadratic Feature MSE Calculator</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f7f7f7;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            background: #fff;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 2em;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 1em;
+        }
+        label {
+            display: block;
+            margin-top: 1em;
+            margin-bottom: 0.3em;
+        }
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 0.5em;
+            margin-bottom: 1em;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            font-size: 1em;
+        }
+        button {
+            margin-right: 1em;
+            margin-bottom: 1em;
+            padding: 0.7em 1.2em;
+            background: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            font-size: 1em;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        #result {
+            margin-top: 1.5em;
+            font-size: 1.2em;
+            text-align: center;
+        }
+        #network {
+            margin-top: 2em;
+            margin-bottom: 2em;
+        }
+        .btn-group {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Quadratic Feature (x₁ and x₁²) MSE Calculator</h1>
+        <form id="mseForm">
+            <label for="weights">Weights (comma-separated, w₀,w₁,w₂):</label>
+            <input type="text" id="weights" placeholder="e.g. 0.4,1,-0.6" required>
+            <label for="csvdata">Paste CSV Data (x₁,y):</label>
+            <textarea id="csvdata" rows="10" cols="40" placeholder="x1,y&#10;-0.9,-1.01&#10;-0.7,-1.1&#10;..." required></textarea>
+            <button type="submit">Load Data</button>
+        </form>
+        <div class="btn-group">
+            <button id="playBtn">Play all</button>
+            <button id="stepBtn">Step next</button>
+            <button id="resetBtn">Reset</button>
+            <button id="lossBtn">Show loss (SSE)</button>
+        </div>
+        <div id="result"></div>
+        <canvas id="network" width="700" height="350"></canvas>
+    </div>
+    <script>
+        let data = [];
+        let weights = [0.4, 1, -0.6];
+        let currentStep = 0;
+        let playing = false;
+        let chart;
+        let outputs = [];
+        let sse = 0;
+
+        function parseData() {
+            const csv = document.getElementById('csvdata').value.trim();
+            const lines = csv.split('\n').filter(line => line.trim() !== '');
+            let rows = lines;
+            if (lines[0].toLowerCase().includes('x1') || lines[0].toLowerCase().includes('y')) {
+                rows = lines.slice(1);
+            }
+            data = rows.map(line => {
+                const [x1, y] = line.split(',').map(Number);
+                return { x1, x1sq: x1 * x1, y };
+            });
+        }
+
+        function computeOutputs() {
+            outputs = [];
+            sse = 0;
+            for (let i = 0; i < data.length; i++) {
+                const { x1, x1sq, y } = data[i];
+                const y_pred = weights[0] + weights[1] * x1 + weights[2] * x1sq;
+                outputs.push({ y_pred, y });
+                sse += Math.pow(y - y_pred, 2);
+            }
+        }
+
+        function drawNetwork(step = null) {
+            // Prepare table data for chart
+            const labels = data.map((_, i) => (i + 1).toString());
+            const x1s = data.map(d => d.x1);
+            const x1sqs = data.map(d => d.x1sq);
+            const y_preds = outputs.map(o => o.y_pred);
+            const ys = outputs.map(o => o.y);
+
+            // Only show up to current step if animating
+            let showCount = step !== null ? step + 1 : data.length;
+
+            // Draw table-like chart
+            const tableData = {
+                labels: labels.slice(0, showCount),
+                datasets: [
+                    { label: 'x₁', data: x1s.slice(0, showCount), borderColor: '#888', backgroundColor: '#888', type: 'line', fill: false },
+                    { label: 'x₁²', data: x1sqs.slice(0, showCount), borderColor: '#aaa', backgroundColor: '#aaa', type: 'line', fill: false },
+                    { label: 'ŷ', data: y_preds.slice(0, showCount), borderColor: '#007bff', backgroundColor: '#007bff', type: 'line', fill: false },
+                    { label: 'y', data: ys.slice(0, showCount), borderColor: '#ff6600', backgroundColor: '#ff6600', type: 'line', fill: false }
+                ]
+            };
+
+            if (chart) chart.destroy();
+            chart = new Chart(document.getElementById('network').getContext('2d'), {
+                type: 'line',
+                data: tableData,
+                options: {
+                    responsive: false,
+                    plugins: {
+                        legend: { display: true }
+                    },
+                    scales: {
+                        x: { title: { display: true, text: 'Sample' } },
+                        y: { title: { display: true, text: 'Value' } }
+                    }
+                }
+            });
+        }
+
+        document.getElementById('mseForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            weights = document.getElementById('weights').value
+                .split(',')
+                .map(w => parseFloat(w.trim()))
+                .filter(w => !isNaN(w));
+            if (weights.length !== 3) {
+                document.getElementById('result').innerHTML = `<strong>Error:</strong> Please enter three weights (w₀, w₁, w₂).`;
+                return;
+            }
+            parseData();
+            computeOutputs();
+            currentStep = 0;
+            drawNetwork(0);
+            document.getElementById('result').innerHTML = '';
+        });
+
+        document.getElementById('playBtn').onclick = function() {
+            if (!data.length) return;
+            playing = true;
+            let step = currentStep;
+            function animate() {
+                if (step < data.length && playing) {
+                    drawNetwork(step);
+                    step++;
+                    currentStep = step;
+                    setTimeout(animate, 500);
+                } else {
+                    playing = false;
+                }
+            }
+            animate();
+        };
+
+        document.getElementById('stepBtn').onclick = function() {
+            if (!data.length) return;
+            if (currentStep < data.length) {
+                drawNetwork(currentStep);
+                currentStep++;
+            }
+        };
+
+        document.getElementById('resetBtn').onclick = function() {
+            currentStep = 0;
+            drawNetwork(0);
+            document.getElementById('result').innerHTML = '';
+            playing = false;
+        };
+
+        document.getElementById('lossBtn').onclick = function() {
+            document.getElementById('result').innerHTML = `<strong>SSE:</strong> ${sse.toFixed(6)}`;
+        };
+    </script>
+</body>
+</html>
